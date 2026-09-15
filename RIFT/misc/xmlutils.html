@@ -52,11 +52,14 @@
 <li class="toctree-l1"><a class="reference internal" href="../../examples-ini.html">RIFT pipeline examples: the ini file</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../examples-noini.html">RIFT pipeline examples: command-line</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../osg.html">Using the OSG</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../containers.html">Containers and multi-architecture deployment</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../injections.html">Signal Injections</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../plotting.html">Plotting with RIFT</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../demos.html">Demos</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../hyperpipe.html">HyperPipe</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../troubleshooting.html">General Troubleshooting</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../api_samples_utils.html">Samples Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../gp_likelihood_export.html">Differentiable GP likelihood export and validation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../executables/index.html">Executables</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../physics/index.html">Waveform Generation</a></li>
 </ul>
@@ -149,6 +152,17 @@ NOTE: This is definitely not the best way to do this.</p>
 <dt class="sig sig-object py" id="RIFT.misc.xmlutils.db_to_samples">
 <span class="sig-prename descclassname"><span class="pre">RIFT.misc.xmlutils.</span></span><span class="sig-name descname"><span class="pre">db_to_samples</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_fname</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tbltype</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cols</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#RIFT.misc.xmlutils.db_to_samples" title="Link to this definition"></a></dt>
 <dd><p>Pull samples from db_fname and return object that resembles a row from an XML table.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="RIFT.misc.xmlutils.gps_add_seconds_exact">
+<span class="sig-prename descclassname"><span class="pre">RIFT.misc.xmlutils.</span></span><span class="sig-name descname"><span class="pre">gps_add_seconds_exact</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gps_seconds</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gps_nanoseconds</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offset_seconds</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#RIFT.misc.xmlutils.gps_add_seconds_exact" title="Link to this definition"></a></dt>
+<dd><p>Add float relative offsets to an exact GPS pair using integer nanoseconds.</p>
+<p>The offset is rounded once to the SimInspiral schema’s nanosecond resolution.
+Absolute GPS arithmetic is never performed in float64, whose spacing at
+current epochs is coarser than some sub-sample time-posterior draws.
+Returns arrays <code class="docutils literal notranslate"><span class="pre">(seconds,</span> <span class="pre">nanoseconds)</span></code> with nanoseconds normalized to
+<code class="docutils literal notranslate"><span class="pre">[0,</span> <span class="pre">1e9)</span></code>; negative offsets and second-boundary carries are supported.</p>
 </dd></dl>
 
 <dl class="py function">

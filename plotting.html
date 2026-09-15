@@ -21,7 +21,7 @@
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="HyperPipe" href="hyperpipe.html" />
+    <link rel="next" title="Demos" href="demos.html" />
     <link rel="prev" title="Signal Injections" href="injections.html" /> 
 </head>
 
@@ -55,11 +55,14 @@
 <li class="toctree-l1"><a class="reference internal" href="examples-ini.html">RIFT pipeline examples: the ini file</a></li>
 <li class="toctree-l1"><a class="reference internal" href="examples-noini.html">RIFT pipeline examples: command-line</a></li>
 <li class="toctree-l1"><a class="reference internal" href="osg.html">Using the OSG</a></li>
+<li class="toctree-l1"><a class="reference internal" href="containers.html">Containers and multi-architecture deployment</a></li>
 <li class="toctree-l1"><a class="reference internal" href="injections.html">Signal Injections</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Plotting with RIFT</a></li>
+<li class="toctree-l1"><a class="reference internal" href="demos.html">Demos</a></li>
 <li class="toctree-l1"><a class="reference internal" href="hyperpipe.html">HyperPipe</a></li>
 <li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">General Troubleshooting</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api_samples_utils.html">Samples Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gp_likelihood_export.html">Differentiable GP likelihood export and validation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="executables/index.html">Executables</a></li>
 <li class="toctree-l1"><a class="reference internal" href="physics/index.html">Waveform Generation</a></li>
 </ul>
@@ -124,18 +127,18 @@
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="si">${</span><span class="nv">PATH</span><span class="si">}</span>:path_to_file
 <span class="nv">HERE</span><span class="o">=</span><span class="w"> </span><span class="sb">`</span><span class="nb">pwd</span><span class="sb">`</span>
 <span class="k">for</span><span class="w">  </span>i<span class="w"> </span><span class="k">in</span><span class="w">  </span><span class="sb">`</span>seq<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">5</span><span class="sb">`</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot; ++&quot;</span><span class="w"> </span><span class="nv">$i</span><span class="p">;</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">" ++"</span><span class="w"> </span><span class="nv">$i</span><span class="p">;</span>
 <span class="w">    </span><span class="nb">export</span><span class="w"> </span><span class="nv">HIGHEST_SAMPLE_FILE</span><span class="o">=</span><span class="w"> </span><span class="sb">`</span>ls<span class="w">  </span>analysis_event_<span class="si">${</span><span class="nv">i</span><span class="si">}</span>/posterior_samples*.dat<span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="sb">`</span>
 <span class="w">    </span><span class="nb">echo</span><span class="w"> </span>Sample<span class="w"> </span>file:<span class="w"> </span><span class="si">${</span><span class="nv">HIGHEST_SAMPLE_FILE</span><span class="si">}</span>
-<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="sb">`</span>python<span class="w"> </span>pp_plot_dataproduct.py<span class="w"> </span>--posterior-file<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">HIGHEST_SAMPLE_FILE</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span>--truth-file<span class="w"> </span><span class="si">${</span><span class="nv">HERE</span><span class="si">}</span>/mdc.xml.gz<span class="w"> </span>--truth-event<span class="w"> </span><span class="si">${</span><span class="nv">i</span><span class="si">}</span><span class="w">  </span>--parameter<span class="w"> </span>mc<span class="w"> </span>--parameter<span class="w"> </span>q<span class="w"> </span>--parameter<span class="w"> </span>a1z<span class="w"> </span>--parameter<span class="w"> </span>a2z<span class="w"> </span>--composite-file<span class="w"> </span>analysis_event_<span class="si">${</span><span class="nv">i</span><span class="si">}</span>/all.net<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="sb">`</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="sb">`</span>python<span class="w"> </span>pp_plot_dataproduct.py<span class="w"> </span>--posterior-file<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">HIGHEST_SAMPLE_FILE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>--truth-file<span class="w"> </span><span class="si">${</span><span class="nv">HERE</span><span class="si">}</span>/mdc.xml.gz<span class="w"> </span>--truth-event<span class="w"> </span><span class="si">${</span><span class="nv">i</span><span class="si">}</span><span class="w">  </span>--parameter<span class="w"> </span>mc<span class="w"> </span>--parameter<span class="w"> </span>q<span class="w"> </span>--parameter<span class="w"> </span>a1z<span class="w"> </span>--parameter<span class="w"> </span>a2z<span class="w"> </span>--composite-file<span class="w"> </span>analysis_event_<span class="si">${</span><span class="nv">i</span><span class="si">}</span>/all.net<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="sb">`</span>
 <span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="sb">`</span>cat<span class="w"> </span>analysis_event_<span class="si">${</span><span class="nv">i</span><span class="si">}</span>/iteration*/logs/test*.out<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="sb">`</span><span class="p">;</span>
 <span class="k">done</span><span class="w"> </span>&gt;<span class="w"> </span>net_pp.dat
-<span class="c1"># grab number-only entries, don&#39;t remove floating point</span>
+<span class="c1"># grab number-only entries, don't remove floating point</span>
 grep<span class="w"> </span>-v<span class="w"> </span>++<span class="w"> </span>net_pp.dat<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-v<span class="w"> </span><span class="o">[</span>a-df-z<span class="o">]</span><span class="w"> </span>&gt;<span class="w"> </span>net_pp.dat_clean
 </pre></div>
 </div>
 <p>This gathers the information from above (the parameter p-values for each injection, the maximum log-likelihood, as well as the convergence statistic) into a single file called <code class="docutils literal notranslate"><span class="pre">net_pp.dat_clean</span></code>. Load in the data and make a cumulative CDF plot for each variable, with your favorite plotting code. For lightweight tests, we provide <code class="docutils literal notranslate"><span class="pre">pp_plot.py</span></code></p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pp_plot.py net_pp.dat_clean 2 [&#39;mc&#39;, &#39;q&#39;]</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pp_plot.py net_pp.dat_clean 2 ['mc', 'q']</span>
 </pre></div>
 </div>
 <p>This script orders and plots the p-values for all the injections for each parameter. In the above example, the p-values for chirp mass and mass ratio will be plotted together on a PP plot. The points are displayed with an ellipse representing the <span class="math notranslate nohighlight">\(90%\)</span> confidence interval. Ideally, the points for each parameter should for a diagonal line on the pp-plot, indicating that the distribution of the recovered parameters matches the injected distribution. If your PP plot is <em>not</em> diagonal, there was likely some issue with your run.</p>
@@ -147,7 +150,7 @@ grep<span class="w"> </span>-v<span class="w"> </span>++<span class="w"> </span>
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
         <a href="injections.html" class="btn btn-neutral float-left" title="Signal Injections" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
-        <a href="hyperpipe.html" class="btn btn-neutral float-right" title="HyperPipe" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="demos.html" class="btn btn-neutral float-right" title="Demos" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

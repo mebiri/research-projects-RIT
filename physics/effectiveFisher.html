@@ -54,11 +54,14 @@
 <li class="toctree-l1"><a class="reference internal" href="../examples-ini.html">RIFT pipeline examples: the ini file</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../examples-noini.html">RIFT pipeline examples: command-line</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../osg.html">Using the OSG</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../containers.html">Containers and multi-architecture deployment</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../injections.html">Signal Injections</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../plotting.html">Plotting with RIFT</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../demos.html">Demos</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../hyperpipe.html">HyperPipe</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../troubleshooting.html">General Troubleshooting</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api_samples_utils.html">Samples Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../gp_likelihood_export.html">Differentiable GP likelihood export and validation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../executables/index.html">Executables</a></li>
 <li class="toctree-l1 current"><a class="reference internal" href="index.html">Waveform Generation</a><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="LALSimUtils.html">LALSimulation Utilities</a></li>
@@ -128,7 +131,7 @@
 <p><strong>Example:</strong></p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">x1s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">mc</span> <span class="o">-</span> <span class="mf">0.1</span><span class="p">,</span> <span class="n">mc</span> <span class="o">+</span> <span class="mf">0.1</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
 <span class="n">x2s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">eta</span> <span class="o">-</span> <span class="mf">0.02</span><span class="p">,</span> <span class="n">eta</span> <span class="o">+</span> <span class="mf">0.02</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
-<span class="n">overlaps</span> <span class="o">=</span> <span class="n">evaluate_ip_on_grid</span><span class="p">(</span><span class="n">hfSIG</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">IP</span><span class="p">,</span> <span class="p">[</span><span class="s1">&#39;mc&#39;</span><span class="p">,</span> <span class="s1">&#39;eta&#39;</span><span class="p">],</span> <span class="n">grid</span><span class="p">)</span>
+<span class="n">overlaps</span> <span class="o">=</span> <span class="n">evaluate_ip_on_grid</span><span class="p">(</span><span class="n">hfSIG</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">IP</span><span class="p">,</span> <span class="p">[</span><span class="s1">'mc'</span><span class="p">,</span> <span class="s1">'eta'</span><span class="p">],</span> <span class="n">grid</span><span class="p">)</span>
 <span class="n">gamma</span> <span class="o">=</span> <span class="n">effectiveFisher</span><span class="p">(</span><span class="n">residuals2d</span><span class="p">,</span> <span class="n">x1s</span><span class="p">,</span> <span class="n">x2s</span><span class="p">,</span> <span class="n">overlaps</span><span class="p">)</span>
 </pre></div>
 </div>
