@@ -151,6 +151,7 @@ parser.add_argument("--fit-method",default="rf",help="rf (default) : rf|gp|quadr
 parser.add_argument("--fit-load-gp",default=None,type=str,help="Filename of GP fit to load. Overrides fitting process, but user MUST correctly specify coordinate system to interpret the fit with.  Does not override loading and converting the data.")
 parser.add_argument("--fit-save-gp",default=None,type=str,help="Filename of GP fit to save. ")
 parser.add_argument("--fit-order",type=int,default=2,help="Fit order (polynomial case: degree)")
+parser.add_argument("--fit-distance-tail",action='store_true',help="RoboCode addition: Distance-export (.dslice) runs ONLY, i.e. runs with an explicit distance fit coordinate. Beyond each intrinsic point's exported distance, make the fitted lnL decay to zero as d->infinity instead of holding its edge value (e.g., as RF/ExtraTrees fit does).")
 parser.add_argument("--no-plots",action='store_true')
 parser.add_argument("--using-eos-type", type=str, default=None, help="Name of EOS parameterization (must match what is used for inputs). Will use EOS parameterization to identify appropriate field headers")
 parser.add_argument("--sampler-method",default="adaptive_cartesian",help="adaptive_cartesian|GMM|adaptive_cartesian_gpu")
@@ -169,7 +170,8 @@ parser.add_argument("--supplementary-likelihood-factor-function", default=None,t
 parser.add_argument("--supplementary-likelihood-factor-ini", default=None,type=str,help="With above option, specifies an ini file that is parsed (here) and passed to the preparation code, called when the module is first loaded, to configure the module. EXPERTS ONLY")
 parser.add_argument("--supplementary-coordinate-code", default=None,type=str,help="Coordinate conversion/prior code. Accepts: the literal 'rift_default' (use RIFT.lalsimutils.convert_waveform_coordinates plus RIFT-standard priors); a filesystem path ending in .py (loaded as a plugin); or any importable dotted module name.")
 parser.add_argument("--supplementary-coordinate-function", default=None, type=str, help="Name of the entry-point callable inside the module named by --supplementary-coordinate-code. Defaults to 'convert_coordinates'.")
-
+parser.add_argument("--supplementary-coordinate-ini", default=None, type=str, help="RoboCode: Optional ini file parsed and handed to the coordinate plugin's prepare() hook so it can read its own configuration block(s).")
+parser.add_argument("--supplementary-coordinate-chart", default=None, type=str, help="RoboCode: Which chart (coordinate system) defined by the plugin to use for this run. Required when the plugin's CHARTS dict has > 1 entry; ignored when the plugin doesn't define CHARTS. Different charts can share parameter names but imply different priors -- the chart name disambiguates which (name -> prior) mapping is installed.")
 opts=  parser.parse_args()
 
 #print(" WARNING: Always use internal_use_lnL for now ")
@@ -224,18 +226,24 @@ dat_orig_names = header_str.replace('#','').split()[2:]
 ### Parameters in use
 ###
 
+#This supercedes the robocode attempt at this, and fixes a bug from the CIP 
+#version of the code where having opts.parameter = None and opts.param_implied
+#would create duplicate params in coord_names
 #want: 
     #if opts.parameter -> both fit & sampling
     #if opts.param_implied -> just fit
     #if opts.param_nofit -> just sampling
-    #if no opts.parameter -> coord_names & l_l_coord_names = dat_orig_names
+    #if no opts -> coord_names & l_l_coord_names = dat_orig_names
 coord_names = opts.parameter # coords for both fit and MC sampling
 if coord_names is None:
     coord_names = dat_orig_names
 low_level_coord_names = coord_names # i.e., sampling coords same as data col coords
 
 if opts.parameter_implied:
-    coord_names = coord_names+opts.parameter_implied # coords for fit - wrong if opts.parameter=None
+    if opts.parameter is None:    #this code should fix the bug
+        coord_names = opts.parameter_implied #coords for fit
+    else:
+        coord_names = coord_names+opts.parameter_implied # coords for fit - used to be wrong if opts.parameter=None
 
 if opts.parameter_nofit:
     if opts.parameter is None:
@@ -260,7 +268,7 @@ print(" Coordinate names for Monte Carlo :, ", low_level_coord_names)
 ###
 
 param_ranges = {}
-for range_code  in opts.integration_parameter_range:
+for range_code  in opts.integration_parameter_range: #robocode: (opts.integration_parameter_range or [])
     name, range_str  = range_code.split(':')
     range_expr =     eval(range_str)  # define. Better to split on , for example
     param_ranges[name]  = np.array(range_expr)
@@ -281,6 +289,9 @@ def uniform_prior(x):
 prior_map = {}
 for name in low_level_coord_names:
     prior_map[name] = uniform_prior
+    #Robocode removes the below & delays until after coord conversion code
+    #Only useful if using external code to retrieve bounds via conversion code's 
+    #get_bounds() func (which may or may not be present!) - see HyperPuffball_new for implementation
     if not(name in param_ranges):
         raise Exception(" {} not provided a parameter range ".format(name))  # change later, should fall back to using prior range from above
 
@@ -310,14 +321,14 @@ if opts.supplementary_likelihood_factor_code and opts.supplementary_likelihood_f
   supplemental_ln_likelihood = getattr(external_likelihood_module,opts.supplementary_likelihood_factor_function)
   name_prep = "prepare_"+opts.supplementary_likelihood_factor_function
   if hasattr(external_likelihood_module,name_prep):
-    supplemental_ln_likelhood_prep=getattr(external_likelihood_module,name_prep)
+    supplemental_ln_likelihood_prep=getattr(external_likelihood_module,name_prep)
     # Check for and load in ini file associated with external library
     if opts.supplementary_likelihood_factor_ini:
       import configparser as ConfigParser
       config = ConfigParser.ConfigParser()
       config.optionxform=str # force preserve case! 
       config.read(opts.supplementary_likelihood_factor_ini)
-      supplemental_ln_likelhood_parsed_ini=config
+      supplemental_ln_likelihood_parsed_ini=config
 
       # Call the ini file, tell it what coordinates we are using by name
       supplemental_ln_likelihood_prep(config=supplemental_ln_likelihood_parsed_ini,coords=coord_names)
@@ -325,21 +336,16 @@ if opts.supplementary_likelihood_factor_code and opts.supplementary_likelihood_f
               
 supplemental_coordinate_convert = None
 supplemental_coordinate_invert = None
-if opts.supplementary_coordinate_code and opts.supplementary_coordinate_function:
-    ''' 
-    The robot wants: The loader accepts three forms in --supplementary-coordinate-code: 
-        -the literal 'rift_default', 
-        -a filesystem path to a .py file, or
-        -an importable dotted module name.  
-    The plugin must expose a callable named by --supplementary-coordinate-function
-    with args (x_in, coord_names, low_level_coord_names, **kwargs) that returns 
-    a 2-D ndarray of shape (N, len(coord_names)). 
-    Robot supposedly wants to allow an optional prepare() (one-shot setup, gets 
-    the parsed ini and active coord_name lists) and a register_priors() (mutate 
-    prior_map in place) - see RIFT.misc.coordinate_plugin. I don't care for this.
-    '''
+if opts.supplementary_coordinate_code and opts.supplementary_coordinate_function: 
+    #Ignoring RoboCode completely here - no absurd plugins! Reuse functionality above
     print(" EXTERNAL COORDINATE CONVERSION : {}.{} ".format(opts.supplementary_coordinate_code,opts.supplementary_coordinate_function))
     __import__(opts.supplementary_coordinate_code)
+    '''
+    Expect supplementary-coordinate-code to contain:
+         supplementary-coordinate-function(X, coord_names, **kwargs)
+         "inverse_"+supplementary-coordinate-function(X, coord_names, **kwargs)
+         Optional: get_bounds(param_list, bounds_dict, **kwargs)
+    '''
     external_coordinate_module = sys.modules[opts.supplementary_coordinate_code]
     if hasattr(external_coordinate_module,opts.supplementary_coordinate_function):
         supplemental_coordinate_convert = getattr(external_coordinate_module,opts.supplementary_coordinate_function)
@@ -455,7 +461,12 @@ def fit_rf(x,y,y_errors=None,fname_export='nn_fit'):
     if y_errors is None:
         rf.fit(x,y)
     else:
-        rf.fit(x,y,sample_weight=1./y_errors**2)
+        #WARNING: RoboCode!
+        # floor sigma so a zero error (placeholder rows can leak into the
+        # accumulated marg net with sigma=0) doesn't make sample_weight=1/sigma^2
+        # infinite (sklearn rejects inf sample_weight).
+        rf.fit(x,y,sample_weight=1./np.maximum(np.asarray(y_errors,dtype=float),1e-3)**2)
+        #rf.fit(x,y,sample_weight=1./y_errors**2)
 
     ### reject points with infinities : problems for inputs
     def fn_return(x_in,rf=rf):
@@ -499,14 +510,14 @@ if supplemental_coordinate_convert is None:
     
     dat_out = []
     for line in dat:
-      dat_here= np.zeros(len(coord_names)+2)
-      if line[col_lnL+1] > opts.sigma_cut:
-          print("skipping", line)
-          continue
-      dat_here[:-2] = line[indx_of_orig_names+2]#line[2:len(coord_names)+2]  # modify to use names!
-      dat_here[-2] = line[0]
-      dat_here[-1] = line[1]
-      dat_out.append(dat_here)
+        dat_here= np.zeros(len(coord_names)+2)
+        if line[col_lnL+1] > opts.sigma_cut:
+            print("skipping", line)
+            continue
+        dat_here[:-2] = line[indx_of_orig_names+2]#line[2:len(coord_names)+2]  # modify to use names!
+        dat_here[-2] = line[0]
+        dat_here[-1] = line[1]
+        dat_out.append(dat_here)
     dat_out= np.array(dat_out)
     
     # Repack data #TODO: check this, move outside if block if both routes need it!
@@ -627,6 +638,38 @@ elif opts.fit_method == 'rf':
         Y_err=None
     my_fit = fit_rf(X,Y,y_errors=Y_err)
 
+#WARNING: RoboCode!
+'''
+# Distance tail: make the fit decay beyond each intrinsic point's exported distance support
+# Only meaningful for a distance-export (.dslice) run, where `dist` is a FIT coordinate and the
+# training set is ~50 discrete distances per intrinsic point.  An RF/ExtraTrees fit is piecewise
+# constant outside its training envelope, so past a point's outermost exported slice it returns
+# that slice's lnL forever.  The distance prior is volumetric and keeps growing like d^2, so the
+# integrand grows instead of dying and the recovered distance posterior comes out ~18% too wide
+# in every quantile span, median untouched.  See RIFT/interpolators/distance_tail.py.
+#
+# This wraps whatever fit was just built and is a no-op on the support, so nothing that currently
+# works changes.  It is applied AFTER the cap/threshold cuts above so the tail is built from
+# exactly the rows the fit itself saw.
+'''
+if opts.fit_distance_tail:
+    if my_fit is None:
+        raise ValueError("--fit-distance-tail: no fit was built (--fit-method %s)" % opts.fit_method)
+    if 'dist' not in list(coord_names):
+        # Fail rather than silently do nothing: a run that asked for this and did not get it would
+        # carry the very bias the option exists to remove, with no sign of it in the log.
+        raise ValueError("--fit-distance-tail requires a distance fit coordinate, but coord_names "
+                         "is %s. This option is for distance-export (.dslice) runs." % (list(coord_names),))
+    from RIFT.interpolators.distance_tail import wrap_distance_tail
+    tail_report = {}
+    # The production decay law is the parameter-free chord (ratio = u), so the wrapper's tuning
+    # arguments -- the per-slice edge-slope fit and its `outer_frac`, the alternate laws -- reach
+    # only the diagnostic branches described in RIFT/interpolators/distance_tail.py. They are
+    # deliberately not exposed here: a CLI knob that cannot change the posterior is worse than none.
+    my_fit = wrap_distance_tail(my_fit, X, Y, coord_names, y_errors=Y_err,
+                                lnL_offset=lnL_shift, report=tail_report)
+    print(" DISTANCE TAIL : decay beyond exported support enabled ", tail_report)
+
 
 # Sort for later convenience (scatterplots, etc)
 indx = Y.argsort()#[::-1]
@@ -689,6 +732,8 @@ elif opts.sampler_method == "portfolio":
         sampler_list.append(sampler)
     sampler = mcsamplerPortfolio.MCSampler(portfolio=sampler_list)
 
+#Note: O4d CEP has RoboCode complaining about enforcing --internal-use-lnL (ignored by some samplers). 
+#Unlike it, we aren't stupid, so that nonsense is truncated here.
 
 ##
 ## Loop over param names
@@ -703,11 +748,10 @@ for p in low_level_coord_names:
 
 likelihood_function = None
 log_likelihood_function = None
-#def convert_coords(x):
-#    return x
 def log_likelihood_function(*args):
     return my_fit(convert_coords(np.array([*args]).T ))
 
+#NOTE: RoboCode had a field day reorganizing this in CEP. Those changes ignored here.
 if len(low_level_coord_names) ==1:
     def likelihood_function(x):  
         if isinstance(x,float):
@@ -844,7 +888,8 @@ if opts.internal_use_lnL:
 
 res, var, neff, dict_return = sampler.integrate(fn_passed, *low_level_coord_names,  verbose=True,nmax=int(opts.n_max),n=n_step,neff=opts.n_eff, save_intg=True,tempering_adapt=True, floor_level=1e-3,igrand_threshold_p=1e-3,convergence_tests=test_converged,adapt_weight_exponent=my_exp,no_protect_names=True,**extra_args)  # weight ecponent needs better choice. We are using arbitrary-name functions
 
-
+# result value:  be careful, if the sampler returns lnL, must not take log twice!
+#NOTE: RoboCode messes with this value because of its insane plugin functionality
 # Save result -- needed for odds ratios, etc.
 np.savetxt(opts.fname_output_integral+"_result.txt", [np.log(res)])
 
