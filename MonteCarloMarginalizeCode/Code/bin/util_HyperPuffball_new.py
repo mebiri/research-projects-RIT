@@ -46,15 +46,15 @@ parser.add_argument("--rotated-coord-buffer",default=0.0,type=float,help="deprec
 
 opts = parser.parse_args()
 
-opts.inj_file = "grid_test.txt"
-opts.puff_factor = 0.001
-opts.parameter = ["gamma0","gamma1","gamma2","gamma3","m1","m2"]
-opts.parameter_range = ["[0.2,2]","[-1.6,1.7]","[-0.6,0.6]","[-0.02,0.02]","[1,3]","[1,3]"]
-opts.reflect_parameter = ["gamma0","gamma1","gamma2","gamma3","m1","m2"]
-opts.supplementary_coordinate_code = "dan_rotation_conversion"
-opts.supplementary_coordinate_function = "dan_rotation"
-opts.get_range_from_external = True
-opts.external_range_args = ["buffer=4.0"]
+#opts.inj_file = "grid_test.txt"
+#opts.puff_factor = 0.001
+#opts.parameter = ["gamma0","gamma1","gamma2","gamma3","m1","m2"]
+#opts.parameter_range = ["[0.2,2]","[-1.6,1.7]","[-0.6,0.6]","[-0.02,0.02]","[1,3]","[1,3]"]
+#opts.reflect_parameter = ["gamma0","gamma1","gamma2","gamma3","m1","m2"]
+#opts.supplementary_coordinate_code = "dan_rotation_conversion"
+#opts.supplementary_coordinate_function = "dan_rotation"
+#opts.get_range_from_external = True
+#opts.external_range_args = ["buffer=4.0"]
 
 
 if opts.random_parameter is None:
