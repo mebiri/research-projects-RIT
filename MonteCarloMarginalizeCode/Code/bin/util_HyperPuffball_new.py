@@ -28,34 +28,22 @@ parser.add_argument("--random-parameter-range", action='append', type=str,help="
 parser.add_argument("--downselect-parameter",action='append', help='Name of parameter to be used to eliminate grid points ')
 parser.add_argument("--downselect-parameter-range",action='append',type=str,help="legacy option; prefer --parameter-range")
 parser.add_argument("--reflect-parameter",action='append',type=str)
-parser.add_argument("--regularize",action='store_true',help="Add some ad-hoc terms based on priors, to help with nearly-singular matricies")
-parser.add_argument("--downselect-mass-range",action='store_true',help="Reject points where m2 > m1 for population models (slightly hacky; prefer diff coord sys)")
+parser.add_argument("--regularize",action='store_true',help="Add some ad-hoc terms based on priors, to help with nearly-singular matrices")
 parser.add_argument("--get-range-from-external",action='store_true',help="Get/modify parameter ranges via external func in --supplementary-coordinate-code")
 parser.add_argument("--external-range-args",action='append',help="Provide special args to external range func; syntax: single str 'arg_name=arg_value'.")
 #to unlink downselect & reflection:
-parser.add_argument("--parameter-range",action='append',type=str)
+parser.add_argument("--parameter-range",action='append',type=str,help="Recommended format: 'coord:[lower,upper]'; if no 'coord:' supplied, matches provided ranges with parameter list in cmd line order (old functionality)")
 #for generalization:
 parser.add_argument("--supplementary-coordinate-code", default=None,type=str,help="Coordinate conversion/prior code. Accepts: the literal 'rift_default' (use RIFT.lalsimutils.convert_waveform_coordinates plus RIFT-standard priors); a filesystem path ending in .py (loaded as a plugin); or any importable dotted module name.")
 parser.add_argument("--supplementary-coordinate-function", default=None, type=str, help="Name of the entry-point callable inside the module named by --supplementary-coordinate-code. Defaults to 'convert_coordinates'.")
 #to be deprecated:
+parser.add_argument("--downselect-mass-range",action='store_true',help="Reject points where m2 > m1 for population models (slightly hacky; prefer diff coord sys)")
 parser.add_argument("--use-rotated-spectral-coords",action='store_true',help="deprecated; Apply rotated coord sys to spectral EOS params; from Wysocki 2020 https://arxiv.org/pdf/2001.01747")
 parser.add_argument("--rotated-coord-buffer",default=0.0,type=float,help="deprecated; Fractional buffer (e.g., 0.1; default 0) to extend rotated hypercube space (APPLIES AS % OF BOUND VALUE)")
 #parser.add_argument("--reflect-parameters",action='store_true',help="Toggle parameter reflection, even if no --reflect-parameter provided (for rotated coord reflection)")
 #parser.add_argument("--use-alternate-buffer",action='store_true',help="Buffer expands hypercube by x% of its full width (2x% total expansion), instead of by x% of bound value (equivalent to (2x)% bound val buffer for [-r,+r] bounds.")
 
-
 opts = parser.parse_args()
-
-#opts.inj_file = "grid_test.txt"
-#opts.puff_factor = 0.001
-#opts.parameter = ["gamma0","gamma1","gamma2","gamma3","m1","m2"]
-#opts.parameter_range = ["[0.2,2]","[-1.6,1.7]","[-0.6,0.6]","[-0.02,0.02]","[1,3]","[1,3]"]
-#opts.reflect_parameter = ["gamma0","gamma1","gamma2","gamma3","m1","m2"]
-#opts.supplementary_coordinate_code = "dan_rotation_conversion"
-#opts.supplementary_coordinate_function = "dan_rotation"
-#opts.get_range_from_external = True
-#opts.external_range_args = ["buffer=4.0"]
-
 
 if opts.random_parameter is None:
     opts.random_parameter = []
@@ -90,21 +78,34 @@ param_dict = {}
 if opts.downselect_parameter_range: #to handle legacy uses
     opts.parameter_range = opts.downselect_parameter_range
 
-#make master param dict, then filter into downselect & reflect dicts
+#make master param dict, then filter into downselect & reflect dicts later
 plist = []
 if opts.downselect_parameter:
     plist += opts.downselect_parameter
 if opts.reflect_parameter:
-    plist += opts.reflect_parameter
+    plist += opts.reflect_parameter    
+
+#parse parameter ranges
 if opts.parameter_range:
-    param_ranges = list(map(eval,opts.parameter_range))
-    
-    if len(plist) < len(param_ranges): #allow unbounded params, for now (expect external bounds)
+    if len(opts.parameter_range[0].split(":")) == 1:
+        #legacy cmd line - no variable with range, fill in order
+        param_ranges = list(map(eval,opts.parameter_range))
+        
+        for indx in np.arange(len(param_ranges)):
+            param_dict[plist[indx]] = param_ranges[indx]
+    else:
+        #more intelligent - adapted from ConstructEOSPosterior
+        for range_code in opts.parameter_range: 
+            param_dat = range_code.split(':')
+            if param_dat[0] not in plist:
+                print("  WARNING: skipping param not in reflect/downselect lists:",param_dat[0])
+                continue
+            str_range = param_dat[1].replace("[","").replace("]","").split(",") #safer than eval
+            param_range = [float(x) for x in str_range]
+            param_dict[param_dat[0]] = param_range #note the dict keys' order may be different from param order now
+    if len(plist) < len(param_dict): #allow unbounded params (expect external bounds)
         print(" parameters and parameter ranges inconsistent:",plist,param_ranges)
-        raise Exception(" All bounded coordinates must have a specified parameter range")
-    
-    for indx in np.arange(len(param_ranges)):
-        param_dict[plist[indx]] = param_ranges[indx]
+        raise Exception(" parameter ranges overspecified: missing corresponding parameters")    
 #no else: allow for external bounds to be provided
 
 if opts.use_rotated_spectral_coords:
@@ -147,6 +148,7 @@ if opts.supplementary_coordinate_code and opts.supplementary_coordinate_function
     
     if opts.get_range_from_external: #retrieve/modify param ranges externally
         try:
+            print(" Retrieving param bounds from external module")
             supplemental_bound_func = getattr(external_coordinate_module, "get_bounds")
             param_dict = supplemental_bound_func(plist,param_dict,**external_kwargs)
         except:
@@ -261,7 +263,7 @@ for param in rlist:
     tmp = reflect_dict[param][0] + np.mod(X_out[:,indx] - reflect_dict[param][0], 2*(reflect_dict[param][1] - reflect_dict[param][0]) )
     # final reflection
     tmp = np.where( tmp > reflect_dict[param][1], 2*reflect_dict[param][1] - tmp, tmp)
-    print("   Increment reflect : {} {} ".format(param,np.sum(tmp != X_out[:,indx])))
+    print("   Increment reflect : {} {} ".format(param,np.sum(np.round(tmp,decimals=8) != np.round(X_out[:,indx],decimals=8))))
     X_out[:,indx] = tmp
 
 # Downselect
