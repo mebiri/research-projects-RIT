@@ -7,19 +7,25 @@
 #
 # EXAMPLE:
 #   python `which util_ConstructEOSPosterior.py` --fname fake_int_grid.dat  --parameter gamma1 --parameter gamma2 --lnL-offset 50
+feedback = True
 
-import RIFT.interpolators.BayesianLeastSquares as BayesianLeastSquares
+if feedback: 
+    print("===Initializing CEP===")
+    import time
 
 import argparse
 import sys
 import numpy as np
 import numpy.lib.recfunctions
-import scipy
-import scipy.stats
-import functools
-import itertools
+# skip unused imports
+#import scipy
+#import scipy.stats
+#import functools
+#import itertools
+#import RIFT.interpolators.BayesianLeastSquares as BayesianLeastSquares
 
 import joblib  # http://scikit-learn.org/stable/modules/model_persistence.html
+if feedback: print(" Imported: standard imports and RIFT tools")
 
 # GPU acceleration: NOT YET, just do usual
 xpy_default=numpy  # just in case, to make replacement clear and to enable override
@@ -29,59 +35,17 @@ cupy_success=False
 no_plots = True
 internal_dtype = np.float32  # only use 32 bit storage! Factor of 2 memory savings for GP code in high dimensions
 
- 
-try:
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-    import matplotlib.lines as mlines
-    import corner
-
-    no_plots=False
-except ImportError:
-    print(" - no matplotlib - ")
-
-
-from sklearn.preprocessing import PolynomialFeatures
-if True:
-#try:
-    import RIFT.misc.ModifiedScikitFit as msf  # altenative polynomialFeatures
-else:
-#except:
-    print(" - Faiiled ModifiedScikitFit : No polynomial fits - ")
-from sklearn import linear_model
-
-from igwn_ligolw import lsctables, utils, ligolw
+# Required imports every time
+if feedback: print(" Importing: igwn_ligolw ..."); t1 = time.perf_counter()
+from igwn_ligolw import lsctables, ligolw #utils, # unused import
 lsctables.use_in(ligolw.LIGOLWContentHandler)
+if feedback: print(" Imported: igwn_ligolw ({:.6f} s)\n Importing: mcsampler ...".format(time.perf_counter()-t1)); t1 = time.perf_counter()
 
+#SLOW IMPORT: usual output 'import vegas' is in here:
 import RIFT.integrators.mcsampler as mcsampler
-try:
-    import RIFT.integrators.mcsamplerEnsemble as mcsamplerEnsemble
-    mcsampler_gmm_ok = True
-except:
-    print(" No mcsamplerEnsemble ")
-    mcsampler_gmm_ok = False
-try:
-    import RIFT.integrators.mcsamplerGPU as mcsamplerGPU
-    mcsampler_gpu_ok = True
-    mcsamplerGPU.xpy_default =xpy_default  # force consistent, in case GPU present
-    mcsamplerGPU.identity_convert = identity_convert
-except:
-    print( " No mcsamplerGPU ")
-    mcsampler_gpu_ok = False
-try:
-    import RIFT.integrators.mcsamplerAdaptiveVolume as mcsamplerAdaptiveVolume
-    mcsampler_AV_ok = True
-except:
-    print(" No mcsamplerAV ")
-    mcsampler_AV_ok = False
-try:
-    import RIFT.integrators.mcsamplerPortfolio as mcsamplerPortfolio
-    mcsampler_Portfolio_ok = True
-except:
-    print(" No mcsamplerPortolfio ")
+if feedback: print(" Imported: mcsampler ({:.6f} s)".format(time.perf_counter()-t1))
 
-
-
+#============!!!CONDITIONAL IMPORTS BELOW PARSER ARGUMENTS!!!=================#
 
 
 def add_field(a, descr):
@@ -149,7 +113,7 @@ parser.add_argument("--fit-method",default="rf",help="rf (default) : rf|gp|quadr
 parser.add_argument("--fit-load-gp",default=None,type=str,help="Filename of GP fit to load. Overrides fitting process, but user MUST correctly specify coordinate system to interpret the fit with.  Does not override loading and converting the data.")
 parser.add_argument("--fit-save-gp",default=None,type=str,help="Filename of GP fit to save. ")
 parser.add_argument("--fit-order",type=int,default=2,help="Fit order (polynomial case: degree)")
-parser.add_argument("--fit-distance-tail",action='store_true',help="Distance-export (.dslice) runs ONLY, i.e. runs that carry an explicit distance fit coordinate. Beyond each intrinsic point's exported distance support, make the fitted lnL decay to zero as d->infinity instead of holding its edge value. An RF/ExtraTrees fit is piecewise constant outside its training envelope, so without this it holds lnL flat while the volumetric prior keeps growing like d^2, and the recovered distance posterior comes out ~18 percent too wide. Changes nothing on the support, so it is a strict addition. It is an error to request this without a distance fit coordinate.")
+parser.add_argument("--fit-distance-tail",action='store_true',help="RoboCode addition: Distance-export (.dslice) runs ONLY, i.e. runs with an explicit distance fit coordinate. Beyond each intrinsic point's exported distance, make the fitted lnL decay to zero as d->infinity instead of holding its edge value (e.g., as RF/ExtraTrees fit does).")
 parser.add_argument("--no-plots",action='store_true')
 parser.add_argument("--using-eos-type", type=str, default=None, help="Name of EOS parameterization (must match what is used for inputs). Will use EOS parameterization to identify appropriate field headers")
 parser.add_argument("--sampler-method",default="adaptive_cartesian",help="adaptive_cartesian|GMM|adaptive_cartesian_gpu")
@@ -175,17 +139,91 @@ opts=  parser.parse_args()
 #print(" WARNING: Always use internal_use_lnL for now ")
 #opts.internal_use_lnL=True
 
+#================!!!CONDITIONAL IMPORTS BEGIN HERE!!!=========================#
+
 no_plots = no_plots |  opts.no_plots
+# NO PLOTS IN THIS CODE - skip unused (& slow) imports
+# try:
+#     import matplotlib.pyplot as plt
+#     from mpl_toolkits.mplot3d import Axes3D
+#     import matplotlib.lines as mlines
+#     import corner
+# 
+#     no_plots=False
+# except ImportError:
+#     print(" - no matplotlib - ")
+
+# Polynomial imports for --fit-method polynomial - not implemented
+#from sklearn.preprocessing import PolynomialFeatures #unused import
+#from sklearn import linear_model #unused import
+#import RIFT.misc.ModifiedScikitFit as msf  # altenative polynomialFeatures #unused import
+#print(" - Failed ModifiedScikitFit : No polynomial fits - ")
+
+if feedback: print(" -- SAMPLER METHOD:",opts.sampler_method," -- ")
+port_list = []
+sampler_check = 0
+if opts.sampler_method == "portfolio":
+    port_list = opts.sampler_portfolio
+
+# technically should define all other checks here, except they're never used
+mcsampler_Portfolio_ok=False #not used
+
+# supported options: adaptive_cartesian_gpu, GMM, AV, portfolio
+# portfolio supports: AV, GMM, adaptive_cartesian_gpu, NFlow
+if opts.sampler_method == "GMM" or "GMM" in port_list:
+    try:
+        import RIFT.integrators.mcsamplerEnsemble as mcsamplerEnsemble #nothing in here
+        mcsampler_gmm_ok = True #never used
+        sampler_check += 1
+        if feedback: print(" Imported sampler: GMM")
+    except:
+        print(" No mcsamplerEnsemble ") #don't get this output
+        mcsampler_gmm_ok = False
+if opts.sampler_method == "adaptive_cartesian_gpu" or "adaptive_cartesian_gpu" in port_list:
+    try:
+        import RIFT.integrators.mcsamplerGPU as mcsamplerGPU #no cupy (mcsamplerGPU) is in here
+        mcsampler_gpu_ok = True #never used
+        mcsamplerGPU.xpy_default =xpy_default  # force consistent, in case GPU present
+        mcsamplerGPU.identity_convert = identity_convert
+        sampler_check += 1
+        if feedback: print(" Imported sampler: adaptive_cartesian_gpu")
+    except:
+        print( " No mcsamplerGPU ") #don't get this output
+        mcsampler_gpu_ok = False
+if opts.sampler_method == "AV" or "AV" in port_list:
+    try:
+        import RIFT.integrators.mcsamplerAdaptiveVolume as mcsamplerAdaptiveVolume #no cupy (mcsamplerAV) is in here
+        mcsampler_AV_ok = True #never used
+        sampler_check += 1
+        if feedback: print(" Imported sampler: AV")
+    except:
+        print(" No mcsamplerAV ") #don't get this output
+        mcsampler_AV_ok = False
+#Needed if sampler_method == portfolio, or if method is not any of the above (or those failed to import)
+if opts.sampler_method == 'portfolio' or sampler_check == 0:
+    try:
+        import RIFT.integrators.mcsamplerPortfolio as mcsamplerPortfolio #'no cupy (mcsamplerPortfolio)' & 'Portfolio discovery: loading' are in here
+        mcsampler_Portfolio_ok = True #not used
+        sampler_check += 1
+        if feedback: print(" Imported sampler: mcsamplerPortfolio")
+    except:
+        print(" No mcsamplerPortfolio ") #------------usual print - import usually fails
+
+if sampler_check == 0:
+    raise Exception("  ERROR: requested sampler not supported; choose from: [adaptive_cartesian_gpu, GMM, AV, portfolio]")
+
+#=======================!!!END CONDITIONAL IMPORTS!!!=========================#
+
+
 lnL_shift = 0
 lnL_default_large_negative = -500
 if opts.lnL_shift_prevent_overflow:
     lnL_shift  = opts.lnL_shift_prevent_overflow
 
 
-
+###
 ### Comparison data (from LI)
 ###
-
 downselect_dict = {}
 dlist = []
 dlist_ranges=[]
@@ -203,16 +241,16 @@ for indx in np.arange(len(dlist_ranges)):
 if opts.no_downselect:
     downselect_dict={}
 
-
 test_converged={}
+
 
 ###
 ### Retrieve data
 ###
 #  int_sig sigma/L gamma1 gamma2 ...
 col_lnL = 0
-dat_orig = dat = np.loadtxt(opts.fname)
-dat_orig = dat[dat[:,col_lnL].argsort()] # sort  http://stackoverflow.com/questions/2828059/sorting-arrays-in-numpy-by-column
+dat_orig = dat = np.loadtxt(opts.fname) #all.net, same format as grid/consolidated files
+dat_orig = dat[dat[:,col_lnL].argsort()] # sort by lnL  http://stackoverflow.com/questions/2828059/sorting-arrays-in-numpy-by-column
 print(" Original data size = ", len(dat), dat.shape)
 dat_orig_names = None
 with open(opts.fname,'r') as f:
@@ -220,51 +258,42 @@ with open(opts.fname,'r') as f:
     header_str = header_str.rstrip()
 dat_orig_names = header_str.replace('#','').split()[2:]
 
+
 ###
-### Parameters in use
+### Set up parameters in use
 ###
+# Supercedes the Robocode attempt (which was bad)
+# Fixes the same CIP bug where opts.parameter = None and opts.param_implied != None
+# would cause duplicate params within coord_names
+# Want:
+    #if opts.parameter -> both fit & sampling
+    #if opts.param_implied -> just fit
+    #if opts.param_nofit -> just sampling
+    #if no opts -> coord_names & l_l_coord_names = dat_orig_names
+coord_names = opts.parameter # coords for both fit and MC sampling
+if coord_names is None:
+    coord_names = dat_orig_names
+low_level_coord_names = coord_names # i.e., sampling coords same as data col coords
 
-# Decoupled fit basis vs Monte Carlo sampling basis -- mirrors the
-# convention established by util_ConstructIntrinsicPosterior_GenericCoordinates.py
-# and required for the new coordinate-plugin path:
-#
-#   --parameter X        -> X is BOTH a fit (GP/RF) and a sampling (MC) dim
-#   --parameter-implied X-> X is a fit dim ONLY (the plugin produces it from
-#                           dat_orig_names; the MC integrator never sees it)
-#   --parameter-nofit X  -> X is a sampling dim ONLY (the MC integrates over
-#                           it; the fit never sees it).  Typical use: MC in
-#                           the data-file basis while the fit lives in a
-#                           transformed basis routed through the plugin.
-#
-# Legacy fallback (preserves the pre-decoupling default): if the user
-# supplies neither --parameter nor --parameter-implied, coord_names
-# defaults to the data file's column list.  Likewise low_level_coord_names
-# defaults to the data file's columns when --parameter and --parameter-nofit
-# are both absent.  That way a bare invocation -- no flags -- still does
-# "fit on every column in the file, MC sample in the same basis", which
-# is what every existing hyperpipe / EOS-posterior demo relies on.
-_user_params  = list(opts.parameter)         if opts.parameter         else []
-_user_implied = list(opts.parameter_implied) if opts.parameter_implied else []
-_user_nofit   = list(opts.parameter_nofit)   if opts.parameter_nofit   else []
+if opts.parameter_implied:
+    if opts.parameter is None:    #this should fix the bug
+        coord_names = opts.parameter_implied #coords for fit
+    else:
+        coord_names = coord_names+opts.parameter_implied # coords for fit - used to be wrong if opts.parameter=None
 
-if not _user_params and not _user_implied:
-    coord_names = list(dat_orig_names)             # legacy default
-else:
-    coord_names = _user_params + _user_implied      # fit basis
+if opts.parameter_nofit:
+    if opts.parameter is None:
+        low_level_coord_names = opts.parameter_nofit # coords for MC sampling
+    else:
+        low_level_coord_names = opts.parameter+opts.parameter_nofit # coords for MC sampling
 
-if not _user_params and not _user_nofit:
-    low_level_coord_names = list(dat_orig_names)   # legacy default
-else:
-    low_level_coord_names = _user_params + _user_nofit  # MC basis
-
-# The "easy case": every fit coordinate is also a sampling coordinate (the
-# user supplied only --parameter calls, in the plugin's output basis).  The
-# MC samples are then ALREADY in the fit basis, so the per-sample
-# convert_coords is a pure column selection/permutation -- the plugin is
-# needed only for (a) the one-time conversion of the input grid into the
-# fit basis and (b) the inverse transform of the output samples back to the
-# fiducial (data-file) coordinates.  When this is False (--parameter-implied
-# present), every MC sample must be routed through the plugin.
+# RoboCode: Plugin-use flag:
+# --parameter only:
+#   -every fit coordinate is also a sampling coordinate
+#   -MC samples are already in the fit basis 
+#   -coordinate plugin only for initial & final conversion of full input grid to/from the fit basis
+# --parameter-implied or --parameter-nofit:
+#   -EVERY MC sample must be converted individually (VERY slow), due to correlations between converted coords
 _per_sample_needs_plugin = not all(name in low_level_coord_names for name in coord_names)
 
 error_factor = len(coord_names)
@@ -275,61 +304,88 @@ for name in dat_orig_names:
     except:
         raise Exception(" Currently fitting parameter names must match columns in data file ")
 # TeX dictionary
-print(" Coordinate names for fit :, ", coord_names, " from ", dat_orig_names, " indexed as ", name_index_dict)
-print(" Coordinate names for Monte Carlo :, ", low_level_coord_names)
+print(" Coordinate names from file : ",dat_orig_names, " indexed as ", name_index_dict)
+print(" Coordinate names for fit : ", coord_names)#, " from ", dat_orig_names, " indexed as ", name_index_dict)
+print(" Coordinate names for Monte Carlo : ", low_level_coord_names)
 
 
 ###
 ### Integration ranges
 ###
-
 param_ranges = {}
-for range_code  in (opts.integration_parameter_range or []):
+for range_code in (opts.integration_parameter_range or []):
     name, range_str  = range_code.split(':')
     range_expr =     eval(range_str)  # define. Better to split on , for example
     param_ranges[name]  = np.array(range_expr)
 
-# Add in integration range for everything else, if nothing specified
+# Do coordiante rotation initialization here, in case getting param bounds from conversion module
+# Parse args to be passed to coord convert funcs:
+external_kwargs = {}
+if opts.external_range_args: 
+    for arg in opts.external_range_args:
+        external_kwargs[arg.split("=")[0]] = arg.split("=")[1]
+
+supplemental_coordinate_convert = None
+supplemental_coordinate_invert = None
+if opts.supplementary_coordinate_code and opts.supplementary_coordinate_function: 
+    # Ignoring RoboCode completely here - no absurd plugins! Reuse supplemental likelihood functionality
+    print(" EXTERNAL COORDINATE CONVERSION : {}.{} ".format(opts.supplementary_coordinate_code,opts.supplementary_coordinate_function))
+    __import__(opts.supplementary_coordinate_code)
+    
+    # Expect --supplementary-coordinate-code to contain 3 functions:
+    #     1. supplementary-coordinate-function(X, coord_names, **kwargs)
+    #     2. "inverse_"+supplementary-coordinate-function(X, coord_names, **kwargs)
+    #     3. (optional) get_bounds(param_list, bounds_dict, **kwargs)
+    external_coordinate_module = sys.modules[opts.supplementary_coordinate_code]
+    if hasattr(external_coordinate_module,opts.supplementary_coordinate_function):
+        supplemental_coordinate_convert = getattr(external_coordinate_module,opts.supplementary_coordinate_function)
+    
+        if coord_names == low_level_coord_names: # --parameter only case - required for now
+            print(" All parameters match; working fully in converted coordinates & requiring inverted conversion.")
+            try:
+                supplemental_coordinate_invert = getattr(external_coordinate_module, "inverse_"+opts.supplementary_coordinate_function)
+            except:
+                print("  ERROR: no inverted coordinate conversion routine found - defaulting to per-line conversion routine.")
+                supplemental_coordinate_invert = None
+                # Allow this case to pass: each line will have to be converted individually during integral
+        else:
+            # Fit and sampling bases are not equal; for now, require per-line sample conversion in integral
+            _per_sample_needs_plugin = True
+        # Send X to get converted, get converted X back -> do this later
+    else:
+        print("  ERROR: could not retrieve supplied coordinate function. No coordinate conversions will be applied.")
+    
+    # Retrieve/modify param ranges externally
+    # Separate from above to allow --integration-parameter-range opt to be skipped, even if no rotation
+    # Known weakness: allows retrieval of rotated param bounds even if no coordinate_invert func obtained
+    if opts.get_range_from_external: 
+        try:
+            print(" Retrieving param bounds from external module")
+            supplemental_bound_func = getattr(external_coordinate_module, "get_bounds")
+            param_ranges = supplemental_bound_func(dat_orig_names,param_ranges,**external_kwargs)
+        except Exception as e:
+            print("  ERROR fetching external ranges:",e)
+            print("  WARNING: external range requested but not retrieved. Using supplied bounds as-is.")
+
+
+# Add in integration range for everything not specified - usually "constant" parameters
 for name in dat_orig_names:
     if not name in param_ranges:
         vals = dat_orig[:,name_index_dict[name]]
         param_ranges[name] = [np.min(vals), np.max(vals)]
 
+
 ###
 ### Prior functions : default is UNIFORM, since it is unmodeled and generic
 ###
-#
-# PRIORS AND THE CHANGE-OF-VARIABLES JACOBIAN.
-# We do NOT apply the Jacobian |det d(coord)/d(low_level_coord)| of the
-# coordinate transform here: the sampling-basis prior is taken to be
-# uniform (or whatever the plugin's chart installs), full stop.  The
-# assumption is that the user knows what they are doing and folds any
-# desired measure -- the transform Jacobian, a physically-motivated EOS
-# prior, anything non-uniform -- into a --supplementary-likelihood-factor
-# function, which is evaluated in the fitting/sampling coordinates and so
-# can express an arbitrary prior exactly.  For a linear/affine transform
-# the Jacobian is constant and a uniform input prior maps to a uniform
-# output prior, so the default is already correct there.  A nonlinear
-# plugin that wants the induced prior must supply that factor (or, in
-# future, populate the plugin's jacobian() hook -- see the TODO in
-# RIFT.misc.coordinate_plugin / the tracking issue on falling back to the
-# util_ConstructIntrinsicPosterior_GenericCoordinates default-prior
-# conventions).
-
 def uniform_prior(x):
     return np.ones(x.shape)
 
 prior_map = {}
 for name in low_level_coord_names:
     prior_map[name] = uniform_prior
-# NOTE: range validation (every sampled name must have an integration range)
-# is deferred until AFTER the coordinate plugin is loaded, below.  The plugin
-# can install ranges for the names it produces (CHARTS[chart]['ranges']), and
-# for the remaining names we can auto-derive ranges by forward-transforming
-# the input grid.  Validating here -- as this script used to -- made the
-# chart-declared ranges unreachable dead code and forced the user to repeat
-# every range on the command line.
-
+    if not(name in param_ranges):
+        raise Exception(" {} not provided a parameter range ".format(name))  # change later, should fall back to using prior range from above
 
 prior_range_map = param_ranges
 
@@ -357,17 +413,6 @@ if opts.supplementary_likelihood_factor_code and opts.supplementary_likelihood_f
   external_likelihood_module = sys.modules[opts.supplementary_likelihood_factor_code]
   supplemental_ln_likelihood = getattr(external_likelihood_module,opts.supplementary_likelihood_factor_function)
   name_prep = "prepare_"+opts.supplementary_likelihood_factor_function
-  # Optional <function>_offset hook, same naming convention as prepare_<function>.  A plugin whose
-  # contribution is large must return a CENTRED lnL -- the default path here exponentiates it
-  # (likelihood_function*np.exp(supplemental)), and float64 overflows past ~709, which a single
-  # loud-event quadratic (lnL_peak ~ SNR^2/2) exceeds on its own.  That centring is a constant
-  # multiplicative factor: harmless in the posterior, but it would otherwise leak into the ABSOLUTE
-  # evidence written below and make it wrong by exactly that constant.  The plugin reports what it
-  # removed; we add it back at the write site.  Queried after integration, not here: the value is
-  # only known once the plugin has been prepared/loaded.
-  name_offset = opts.supplementary_likelihood_factor_function+"_offset"
-  if hasattr(external_likelihood_module,name_offset):
-    supplemental_ln_likelihood_offset_fn=getattr(external_likelihood_module,name_offset)
   if hasattr(external_likelihood_module,name_prep):
     supplemental_ln_likelihood_prep=getattr(external_likelihood_module,name_prep)
     # Check for and load in ini file associated with external library
@@ -377,86 +422,23 @@ if opts.supplementary_likelihood_factor_code and opts.supplementary_likelihood_f
       config.optionxform=str # force preserve case!
       config.read(opts.supplementary_likelihood_factor_ini)
       supplemental_ln_likelihood_parsed_ini=config
-
-    # Prepare the plugin, telling it what coordinates we are using by name.  Called whether or not
-    # an ini was supplied (config=None then): a plugin configured entirely by environment still
-    # needs the basis, and without it the arrays it is handed are anonymous -- same count, same
-    # order, no error, wrong coordinates.
-    # coords MUST be low_level_coord_names, not coord_names: the sampler integrates over
-    # low_level_coord_names and so calls supplemental_ln_likelihood(*x) with one array per
-    # SAMPLING coordinate, in that order.  With --parameter-implied/--parameter-nofit the two
-    # lists differ, and handing over the fit basis would make the plugin label those arrays
-    # wrongly -- evaluating at the wrong coordinates without any error.
+    
+    # Call the ini file, tell it what coordinates we are using by name
+    # Robot wants it to be low_level_coord_names: sampler basis, not fit basis
+    # Robot also wants it called even if no ini (config = None)
     supplemental_ln_likelihood_prep(config=supplemental_ln_likelihood_parsed_ini,coords=low_level_coord_names)
+  
+  # RoboCode: Optional <function>_offset hook, for ext prior w/ LARGE lnL > ~709 (float overflow) 
+  # expect scaled lnL (= x*lnL, x < 1) to be returned; use this func to grab scale factor 
+  # will be used to correct absolute lnL & evidence when saving results 
+  name_offset = opts.supplementary_likelihood_factor_function+"_offset"
+  if hasattr(external_likelihood_module,name_offset):
+    supplemental_ln_likelihood_offset_fn=getattr(external_likelihood_module,name_offset)
 
-supplemental_coordinate_convert = None
-supplemental_coordinate_inverse = None
-_coord_plugin_in_names = None
-if opts.supplementary_coordinate_code:
-    # Resolve the user-supplied coordinate-convert plugin.  The loader
-    # accepts three forms in --supplementary-coordinate-code: the literal
-    # 'rift_default', a filesystem path to a .py file, or an importable
-    # dotted module name.  The plugin must expose a callable named by
-    # --supplementary-coordinate-function (default 'convert_coordinates')
-    # with the signature (x_in, coord_names, low_level_coord_names, **kwargs)
-    # returning a 2-D ndarray of shape (N, len(coord_names)).  Plugins may
-    # optionally define prepare() (one-shot setup, gets the parsed ini and
-    # the active coord-name lists) and register_priors() (mutate prior_map
-    # in place).  See RIFT.misc.coordinate_plugin for the full contract.
-    from RIFT.misc.coordinate_plugin import load_coordinate_converter, resolve_input_parameters
-    # Tell the loader (and the plugin's prepare hook) which basis the plugin
-    # will actually be fed as input.  In the easy case the per-sample path
-    # bypasses the plugin entirely, so the only inputs it ever sees are the
-    # data file's columns; declaring low_level_coord_names (= the plugin's
-    # OUTPUT basis in that case) would make a strict plugin reject its own
-    # documented usage.
-    _plugin_fed_input_names = low_level_coord_names if _per_sample_needs_plugin else dat_orig_names
-    supplemental_coordinate_convert, _coord_plugin_module = load_coordinate_converter(
-        spec=opts.supplementary_coordinate_code,
-        function_name=opts.supplementary_coordinate_function,
-        ini_path=opts.supplementary_coordinate_ini,
-        coord_names=coord_names,
-        low_level_coord_names=_plugin_fed_input_names,
-        chart=opts.supplementary_coordinate_chart,
-        opts=opts,
-        prior_map=prior_map,
-        prior_range_map=prior_range_map,
-    )
-    # Optional inverse (plugin basis -> file basis), same hook the puff lane
-    # (util_HyperparameterPuffball.py) uses.  Needed to write the final
-    # posterior samples in fiducial coordinates when the sampling basis is
-    # not a subset of the data file's columns.
-    supplemental_coordinate_inverse = getattr(_coord_plugin_module, "inverse_convert_coordinates", None)
-    _coord_plugin_in_names = resolve_input_parameters(
-        _coord_plugin_module, chart=opts.supplementary_coordinate_chart
-    ) or list(dat_orig_names)
 
-# Auto-derive integration ranges for sampled names that are still missing one:
-# forward-transform the input grid into the sampling basis and use the
-# column-wise min/max.  Explicit --integration-parameter-range and
-# chart-declared ranges (installed by the loader above) always win; this is
-# only a fallback so the easy case needs no per-name range flags at all.
-if supplemental_coordinate_convert is not None:
-    _names_missing_range = [p for p in low_level_coord_names if p not in param_ranges]
-    if _names_missing_range:
-        try:
-            _dat_sampling_basis = supplemental_coordinate_convert(
-                dat[:, 2:],
-                coord_names=_names_missing_range,
-                low_level_coord_names=dat_orig_names,
-            )
-            for _k, _name in enumerate(_names_missing_range):
-                _vals = np.asarray(_dat_sampling_basis)[:, _k]
-                param_ranges[_name] = [np.min(_vals), np.max(_vals)]
-                print(" Integration range for {} auto-derived from transformed input grid : {} ".format(_name, param_ranges[_name]))
-        except Exception as _err:
-            print(" Could not auto-derive integration ranges for {} via the coordinate plugin ({}); supply --integration-parameter-range ".format(_names_missing_range, _err))
-
-# Deferred range validation (see note at the prior_map seeding above).
-for name in low_level_coord_names:
-    if not (name in param_ranges):
-        raise Exception(" {} not provided a parameter range ".format(name))
-
+###
+### Fit methods
+###
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel as C
 
@@ -555,11 +537,13 @@ def fit_rf(x,y,y_errors=None,fname_export='nn_fit'):
     if y_errors is None:
         rf.fit(x,y)
     else:
+        # WARNING: RoboCode!
         # floor sigma so a zero error (placeholder rows can leak into the
         # accumulated marg net with sigma=0) doesn't make sample_weight=1/sigma^2
         # infinite (sklearn rejects inf sample_weight).
         rf.fit(x,y,sample_weight=1./np.maximum(np.asarray(y_errors,dtype=float),1e-3)**2)
-
+        #rf.fit(x,y,sample_weight=1./y_errors**2)
+        
     ### reject points with infinities : problems for inputs
     def fn_return(x_in,rf=rf):
         f_out = -lnL_default_large_negative*np.ones(len(x_in))
@@ -579,109 +563,71 @@ def fit_rf(x,y,y_errors=None,fname_export='nn_fit'):
     return fn_return
 
 
-
-
-
-# initialize
-dat_mass  = [] 
-weights = []
-n_params = -1
-
-
- ###
- ### Convert data.   RIGHT NOW JUST DOWNSELECTING, no intermediate fitting parameters defined
- ###
-
+###
+### Convert data.   RIGHT NOW JUST DOWNSELECTING, no intermediate fitting parameters defined
+###
 # Naive convert: no downselect.
-if (supplemental_coordinate_convert ==None):
+# Repack/filter data: [lnL, sigma_lnL, dat_orig_names] -> [coord_names, lnL, sigma_lnL]
+indx_of_orig_names = np.array([dat_orig_names.index(k) for k in coord_names]) 
+dat_out = []
+for line in dat:
+    dat_here = np.zeros(len(coord_names)+2)
+    if line[col_lnL+1] > opts.sigma_cut:
+        print("skipping", line)
+        continue
+    dat_here[:-2] = line[indx_of_orig_names+2]#line[2:len(coord_names)+2]  # modify to use names!
+    dat_here[-2] = line[0] # lnL
+    dat_here[-1] = line[1] # sigma_lnL
+    dat_out.append(dat_here)
+dat_out = np.array(dat_out)
 
+if supplemental_coordinate_convert is None:
+    # the old way: no conversion allowed, all param ranges stay as-is, data unchanged, sampler in Cartesian
+    # TODO: not sure why coord_names == low_level_coord_names must be true
+    
     # The identity convert_coords below only makes sense when the fit
     # basis equals the MC sampling basis equals a permutation of the
     # data file's columns.  Catch the new "split-basis" misconfiguration
     # early, otherwise the integrator silently feeds samples in
-    # low_level_coord_names through an identity into a fit built on
-    # coord_names.
+    # low_level_coord_names through an identity into a fit built on coord_names.
     if list(low_level_coord_names) != list(coord_names):
-        raise ValueError(
-            " EOSPosterior: --parameter-implied / --parameter-nofit make "
-            "the fit basis ({coord!r}) differ from the MC sampling basis "
-            "({low!r}), but no --supplementary-coordinate-code was "
-            "supplied.  The integrator cannot translate between the two "
-            "bases without a converter.".format(
-                coord=list(coord_names),
-                low=list(low_level_coord_names),
-            )
-        )
+        raise ValueError(" ERROR: fit basis ({}) differs from MC sampling basis ({}), but no --supplementary-coordinate-code was supplied.".format(list(coord_names),list(low_level_coord_names))) 
+        #"The integrator cannot translate between the two bases without a converter."    
 
-    indx_of_orig_names =  np.array([ dat_orig_names.index(coord_names[k]) for k in range(len(coord_names))])
-    dat_out = []
-    for line in dat:
-        dat_here= np.zeros(len(coord_names)+2)
-        if line[col_lnL+1] > opts.sigma_cut:
-            print("skipping", line)
-            continue
-        dat_here[:-2] = line[indx_of_orig_names+2]#line[2:len(coord_names)+2]  # modify to use names!
-        dat_here[-2] = line[0]
-        dat_here[-1] = line[1]
-        dat_out.append(dat_here)
-    dat_out= np.array(dat_out)
-
-    # Repack data, WHOLE SET
-    X =dat_out[:,0:len(coord_names)]
-    Y = dat_out[:,-2]
-    if np.max(Y)<0 and lnL_shift ==0: 
-        lnL_shift  = -100 - np.max(Y)   # force it to be offset/positive -- may help some configurations. Remember our adaptivity is silly.
-    Y_err = dat_out[:,-1]
-    def convert_coords(x):
+    # Repack data
+    X = dat_out[:,0:len(coord_names)]
+    def convert_coords(x): # no conversion needed
         return x
-
 else:
-    # Pack data, using coordinate converter. Note later calculations MUST use the converter.
-    #
-    # Two distinct call sites for the converter, with two different
-    # input bases -- this is the change that decouples the fit from
-    # the MC sampling basis:
-    #
-    #   (1) The initial dat->X conversion below feeds rows whose
-    #       columns are ordered by dat_orig_names (the data file's
-    #       header).  So we pass low_level_coord_names=dat_orig_names
-    #       at this site.
-    #
-    #   (2) The convert_coords closure is what the integrator calls
-    #       on every Monte Carlo sample.  The sampler operates in
-    #       low_level_coord_names (we add_parameter() over that list
-    #       below), so the closure must claim its inputs are in
-    #       low_level_coord_names -- NOT dat_orig_names.  Pre-fix this
-    #       was hardcoded to dat_orig_names, which only happened to
-    #       work when low_level_coord_names == dat_orig_names (i.e.
-    #       the legacy case).  For any non-trivial plugin where the
-    #       MC samples in a different basis than the file's columns,
-    #       the old behaviour applied the rotation an extra time and
-    #       silently mis-evaluated lnL.
-    X = supplemental_coordinate_convert(dat[:,2:], coord_names=coord_names, low_level_coord_names=dat_orig_names) # convert and generate X
-    Y = dat[:,0]
-    Y_err = dat[:,1]
-    if np.max(Y)<0 and lnL_shift ==0:
-        lnL_shift  = -100 - np.max(Y)   # force it to be offset/positive -- may help some configurations. Remember our adaptivity is silly.
-    if not _per_sample_needs_plugin:
-        # Easy case: the sampling basis contains every fit coordinate, so a
-        # Monte Carlo sample is already in the fit basis (up to column
-        # selection/order).  Do NOT route per-sample batches through the
-        # plugin -- its forward map expects file-basis inputs
-        # (INPUT_PARAMETERS), not its own outputs, and would either raise
-        # or, worse, silently apply the transform a second time.
-        _fit_col_of_sample = np.array([ low_level_coord_names.index(name) for name in coord_names ])
-        def convert_coords(x_in, _idx=_fit_col_of_sample):
-            return np.asarray(x_in)[:, _idx]
-    else:
+    # Pack data using coordinate converter, for fitting 
+    # dat_out has columns filtered and ordered by coord_names, so pass that here 
+    X = supplemental_coordinate_convert(dat_out[:,0:len(coord_names)], coord_names=coord_names, **external_kwargs)
+    
+    if (supplemental_coordinate_invert is None) or _per_sample_needs_plugin:
+        # No inversion -> sampler stays in Cartesian, must convert per-line later
+        # Sampler operates in low_level_coord_names, so convert_coords() must claim 
+        # its inputs are in low_level_coord_names (not dat_orig_names, like in old version).
+        # x_in presumably contains samples of params in low_level_coord_names, so pass that here
         def convert_coords(x_in, _low=low_level_coord_names, _coord=coord_names):
-            # _low / _coord captured as defaults so the closure stays correct
-            # even if either list mutates later in the script.
-            return supplemental_coordinate_convert(x_in, coord_names=_coord, low_level_coord_names=_low)
+            return supplemental_coordinate_convert(x_in, coord_names=_low, **external_kwargs)
+    else: 
+        # Sampling in converted coords, so no need to convert again
+        def convert_coords(x):
+            return x
+        # RoboCode: the following fails if name in coord_names not in low_level_coord_names:
+        #_fit_col_of_sample = np.array([ low_level_coord_names.index(name) for name in coord_names ])
+        #def convert_coords(x_in, _idx=_fit_col_of_sample):
+        #    return np.asarray(x_in)[:, _idx]
+        
+    
+Y = dat_out[:,-2]
+if np.max(Y)<0 and lnL_shift==0: 
+    lnL_shift = -100 - np.max(Y)   # force it to be offset/positive -- may help some configurations. Remember our adaptivity is silly.
+Y_err = dat_out[:,-1]
+
 # Save copies for later (plots)
 X_orig = X.copy()
 Y_orig = Y.copy()
-
 
 
 # Eliminate values with Y too small
@@ -706,7 +652,6 @@ elif n_ok < 10: # and max_lnL > 30:
     indx_ok = list(map(int,indx_list[:10,0]))
     print(" Revised number of points for fit: ", np.sum(indx_ok), len(indx_ok), indx_list[:10])
 X_raw = X.copy()
-
 
 
 my_fit= None
@@ -744,8 +689,8 @@ elif opts.fit_method == 'rf':
         Y_err=None
     my_fit = fit_rf(X,Y,y_errors=Y_err)
 
+# WARNING: RoboCode!
 ### Distance tail: make the fit decay beyond each intrinsic point's exported distance support
-###
 ### Only meaningful for a distance-export (.dslice) run, where `dist` is a FIT coordinate and the
 ### training set is ~50 discrete distances per intrinsic point.  An RF/ExtraTrees fit is piecewise
 ### constant outside its training envelope, so past a point's outermost exported slice it returns
@@ -781,12 +726,9 @@ X=X[indx]
 Y=Y[indx]
 
 
-
 ###
-### Integrate posterior
+### Integration set-up: initialize sampler
 ###
-
-
 sampler = mcsampler.MCSampler()
 if opts.sampler_method == "adaptive_cartesian_gpu":
     sampler = mcsamplerGPU.MCSampler()
@@ -835,57 +777,36 @@ elif opts.sampler_method == "portfolio":
         print('PORTFOLIO: adding {} '.format(name))
         sampler_list.append(sampler)
     sampler = mcsamplerPortfolio.MCSampler(portfolio=sampler_list)
+    opts.internal_use_lnL= True  # set for all samplers in portfolio (default)
+
+# Note: Robocode here complains about enforcing --internal-use-lnL (ignored by some samplers). 
+#  AV, NFlow, Portfolio -> always use internal_lnL -> set opts.use_internal_lnL = True (enforced above)
+#  adaptive_cartesian_gpu, GMM -> depend on opts.internal_use_lnL
+#  default mcsampler -> always returns L -> set opts.use_internal_lnL = False
+# Ignore this enforcement: the user will know whether to set opts.use_internal_lnL or not
 
 
-# Does this sampler hand back ln(integral), or the integral itself?
-#
-# --internal-use-lnL alone does NOT answer that.  'use_lnL'/'return_lnI' ride in as
-# **kwargs to integrate(), and several samplers ignore one or both of them:
-#   mcsamplerAdaptiveVolume, mcsamplerNFlow, mcsamplerPortfolio
-#                     -- integrate() ALWAYS delegates to integrate_log(); the return is
-#                        ln(integral) whether or not the flags were passed
-#   mcsamplerGPU      -- delegates to integrate_log() only when use_lnL is set
-#   mcsamplerEnsemble -- the only sampler that reads return_lnI
-#   mcsampler         -- the legacy 'adaptive_cartesian' backend: reads NEITHER flag,
-#                        and always returns the linear integral
-# Key off the class actually constructed above rather than off --sampler-method: the
-# portfolio branch rebinds sampler, and an unrecognized --sampler-method silently falls
-# through to the default mcsampler.
-_sampler_module = type(sampler).__module__.split('.')[-1]
-if _sampler_module in ['mcsamplerAdaptiveVolume', 'mcsamplerNFlow', 'mcsamplerPortfolio']:
-    sampler_returns_ln_integral = True
-elif _sampler_module in ['mcsamplerGPU', 'mcsamplerEnsemble']:
-    sampler_returns_ln_integral = bool(opts.internal_use_lnL)  # exactly when use_lnL/return_lnI are set below
-else:  # mcsampler, the legacy adaptive_cartesian backend
-    sampler_returns_ln_integral = False
-    if opts.internal_use_lnL:
-        # This backend ignores use_lnL, so it would integrate lnL as though it were L:
-        # the returned value is not an evidence in either convention, and neither
-        # res nor log(res) can repair it.  Refuse rather than write a meaningless
-        # number to --fname-output-integral.  Compare ok_lnL_methods/bad_lnL_methods
-        # in util_ConstructIntrinsicPosterior_GenericCoordinates.py.
-        print(" OPTION MISMATCH : --internal-use-lnL needs a sampler that honors it; --sampler-method {} builds {}, which ignores it.  Use GMM, AV, adaptive_cartesian_gpu, or portfolio.".format(opts.sampler_method, _sampler_module))
-        sys.exit(99)
-
-
-##
-## Loop over param names
-##
-# IMPORTANT: iterate over low_level_coord_names, not coord_names.  The
-# sampler operates in the MC basis.  coord_names is the FIT basis, which
-# only the GP/RF and the convert_coords closure see.  Pre-decoupling this
-# loop used coord_names because the two lists were forced to be equal.
+###
+### Loop over param names
+###
+# Iterate over low_level_coord_names (sampler basis), not coord_names (fit basis)
+# In legacy case the lists are equal so it doesn't matter
 for p in low_level_coord_names:
     prior_here = prior_map[p]
     range_here = prior_range_map[p]
 
     sampler.add_parameter(p, pdf=np.vectorize(lambda x:1), prior_pdf=prior_here,left_limit=range_here[0],right_limit=range_here[1],adaptive_sampling=True)
 
+
+###
+### Likelihood functions & other sampler arguments
+###
 likelihood_function = None
 log_likelihood_function = None
 def log_likelihood_function(*args):
     return my_fit(convert_coords(np.array([*args]).T ))
 
+# NOTE: Robot had a field day reorganizing this.
 # Fixed-arity wrappers around log_likelihood_function / likelihood_function.
 #
 # mcsampler's adaptive code introspects the wrapped function's argument
@@ -964,15 +885,12 @@ else:
     )
 
 
-
-
 n_step = opts.n_step
 my_exp = np.min([1,0.8*np.log(n_step)/np.max(Y)])   # target value : scale to slightly sublinear to (n_step)^(0.8) for Ymax = 200. This means we have ~ n_step points, with peak value wt~ n_step^(0.8)/n_step ~ 1/n_step^(0.2), limiting contrast
 if np.max(Y_orig) < 0:   # for now, don't use a weight exponent if we are negative: can't use guess based from GW experience
     my_exp = 1
 #my_exp = np.max([my_exp,  1/np.log(n_step)]) # do not allow extreme contrast in adaptivity, to the point that one iteration will dominate
 print(" Weight exponent ", my_exp, " and peak contrast (exp)*lnL = ", my_exp*np.max(Y), "; exp(ditto) =  ", np.exp(my_exp*np.max(Y)), " which should ideally be no larger than of order the number of trials in each epoch, to insure reweighting doesn't select a single preferred bin too strongly.  Note also the floor exponent also constrains the peak, de-facto")
-
 
 extra_args={}
 if opts.sampler_method == "GMM":
@@ -1029,26 +947,24 @@ if opts.internal_use_lnL:
         fn_passed =  lambda *x: log_likelihood_function(*x) + supplemental_ln_likelihood(*x)
     extra_args.update({"use_lnL":True,"return_lnI":True})
 
+###
+### INTEGRATE - MC integrates in the SAMPLING basis (low_level_coord_names); convert_coords routes each sample into the fit basis (coord_names) before evaluating the GP/RF
+###
+res, var, neff, dict_return = sampler.integrate(fn_passed, *low_level_coord_names,  verbose=True,nmax=int(opts.n_max),n=n_step,neff=opts.n_eff, save_intg=True,tempering_adapt=True, floor_level=1e-3,igrand_threshold_p=1e-3,convergence_tests=test_converged,adapt_weight_exponent=my_exp,no_protect_names=True,**extra_args) # weight exponent needs better choice. We are using arbitrary-name functions
 
-
-res, var, neff, dict_return = sampler.integrate(fn_passed, *low_level_coord_names,  verbose=True,nmax=int(opts.n_max),n=n_step,neff=opts.n_eff, save_intg=True,tempering_adapt=True, floor_level=1e-3,igrand_threshold_p=1e-3,convergence_tests=test_converged,adapt_weight_exponent=my_exp,no_protect_names=True,**extra_args)  # MC integrates in the SAMPLING basis (low_level_coord_names); convert_coords routes each sample into the fit basis (coord_names) before evaluating the GP/RF
-
-# result value:  be careful, if the sampler returns lnI, then must not take log twice!
-# See sampler_returns_ln_integral where the sampler is constructed: this is a property of
-# the backend, NOT of --internal-use-lnL.
+# result value:  be careful, if the sampler returns lnL, must not take log twice!
+# opts.internal_use_lnL = True enforced for certain samplers above
 ln_integrand_value = None
-if sampler_returns_ln_integral:
+if opts.internal_use_lnL:
     ln_integrand_value = res
 else:
     ln_integrand_value = np.log(res)
 
 # Save result -- needed for odds ratios, etc.
-# Absolute scale: a supplementary-likelihood plugin may subtract a constant from its own lnL to keep
-# the exponentiated integrand in float64 range (see the <function>_offset note at the import above).
-# That constant divides out of the posterior but not out of an evidence -- which is exactly what
-# this file is read as -- so it is restored here.  Queried now rather than next to the prepare call
-# because a plugin configured entirely by environment prepares itself lazily on its first
-# evaluation.  Stays 0.0 for plugins that do not centre and for runs with no supplementary factor.
+# RoboCode: Absolute scale of everything reported below. Supplementary-likelihood plugin might subtract a
+# constant from its own lnL to keep the exponentiated integrand in float64 range; that constant divides 
+# out of the posterior but not out of an evidence or an absolute lnL. 
+# = 0.0 for every plugin that does not center or when no supplementary factor at all
 if supplemental_ln_likelihood_offset_fn:
     supplemental_ln_likelihood_offset = float(supplemental_ln_likelihood_offset_fn())
     print(" EXTERNAL SUPPLEMENTARY LIKELIHOOD FACTOR : restoring offset {} in reported evidence ".format(supplemental_ln_likelihood_offset))
@@ -1059,6 +975,10 @@ if neff < len(coord_names):
     print(" PLOTS WILL FAIL ")
     print(" Not enough independent Monte Carlo points to generate useful contours")
 
+# initialize
+dat_mass = [] #value set but never used
+weights = [] 
+n_params = -1 #value set but only used to set dat_mass
 
 samples = sampler._rvs
 print(samples.keys())
@@ -1117,79 +1037,63 @@ lnLmax = np.max(lnL)
 weights = np.exp(lnL-lnLmax)*p/ps
 
 
-
 print(" ---- Subset for posterior samples (and further corner work) --- ")
 
 
 p_norm = (weights/np.sum(weights))
 indx_list = np.random.choice(np.arange(len(weights)), p=p_norm.astype(np.float64),size=opts.n_output_samples)
 
-
 dat_out = np.zeros( (opts.n_output_samples,2+len(dat_orig_names)) )
 
-# The output file is ALWAYS in the fiducial coordinates dat_orig_names (the
-# data file's own basis), regardless of what basis we fit or sampled in.
-# Each output column is one of three kinds:
-#
-#   (1) directly sampled    : its name is in low_level_coord_names -- write
-#       the weighted posterior draws for it.
-#   (2) transform-covered   : the MC sampled in the plugin's output basis
-#       (names NOT in dat_orig_names); apply the plugin's
-#       inverse_convert_coordinates to the drawn samples to recover the
-#       fiducial columns the transform spans.
-#   (3) non-sampled extras  : global constants, derived quantities, nuisance
-#       parameters carried in the data file -- fill from input-grid rows
-#       selected AT RANDOM (row-coherently, so derived quantities stay
-#       consistent across columns within one output row).
-_sampled_file_cols   = [name for name in low_level_coord_names if name in name_index_dict]
-_sampled_plugin_cols = [name for name in low_level_coord_names if name not in name_index_dict]
-_covered_cols = set(_sampled_file_cols)
+# Write out: output file always in dat_orig_names coords
+#  NOTE: any converted coords using plugin MUST use same name as initial coords
+# There can be 2 types of output cols:
+#  1. sampled (rotated or initial coords) -> invert if possible, assume inversion will handle cols correctly
+#  2. not sampled ("constant" or fit-only) -> fill in using initial dat (never converted)
+sampled_cols = [name for name in low_level_coord_names if name in name_index_dict]
+sampled_extra_cols = [name for name in low_level_coord_names if name not in name_index_dict]
+if sampled_extra_cols:
+    print("  WARNING: Sampled coordinates {!r} not in original data file: cannot write these out!".format(sampled_extra_cols))
+constant_cols = [name for name in dat_orig_names if name not in sampled_cols]
 
-# (1) directly sampled columns
-for name in _sampled_file_cols:
+# Fill in all sampled parameters
+for name in sampled_cols:
     dat_out[:, name_index_dict[name]] = samples[name][indx_list]
 
-# (2) inverse-transform plugin-basis draws back to fiducial coordinates
-if _sampled_plugin_cols:
-    if supplemental_coordinate_inverse is None:
-        print(" WARNING: sampled coordinate(s) {!r} are not data-file columns and the "
-              "coordinate plugin does not define inverse_convert_coordinates; their "
-              "posterior information CANNOT be written to the fiducial-coordinate "
-              "output file.  Add an inverse to the plugin.".format(_sampled_plugin_cols))
+# Fill in any non-sampled parameters
+if constant_cols: 
+    print("  Not sampled:", constant_cols, "; adding to output as constant.")
+    if len(dat) < opts.n_output_samples:
+        fill_rows = opts.n_output_samples - len(dat)
+        print(" NOTE: original data shorter than requested output; adding",fill_rows,"duplicate fill lines from original data.")
+        fill_indx = np.random.choice(np.arange(len(dat)), size=fill_rows, replace=True)
+        for name in constant_cols:
+            outidx = name_index_dict[name]
+            # Ensure every point in col appears at least once, then fill the difference with random duplicates
+            newlines = np.concatenate((dat[:,outidx], dat[fill_indx,outidx]), axis=0)
+            dat_out[:, outidx] = newlines
     else:
-        _S_plugin = np.column_stack([ samples[name][indx_list] for name in _sampled_plugin_cols ])
-        _X_fiducial = np.asarray(
-            supplemental_coordinate_inverse(
-                _S_plugin,
-                coord_names=_sampled_plugin_cols,
-                low_level_coord_names=_coord_plugin_in_names,
-            ), dtype=float)
-        for _j, name in enumerate(_coord_plugin_in_names):
-            if name in name_index_dict and name not in _covered_cols:
-                dat_out[:, name_index_dict[name]] = _X_fiducial[:, _j]
-                _covered_cols.add(name)
+        for name in constant_cols:
+            outidx = name_index_dict[name]
+            dat_out[:, outidx] = dat[:opts.n_output_samples, outidx] #truncate original data to fit (not ideal)
 
-# (3) non-sampled extra columns: random input-grid rows (matches the
-# rift_O4d capability; random selection rather than truncation avoids the
-# bias of taking the first n_output_samples rows of a structured grid, and
-# replaces the old duplicate-fill bookkeeping when len(dat) is short).
-_extra_cols = [name for name in dat_orig_names if name not in _covered_cols]
-if _extra_cols:
-    print("  Not sampled:", _extra_cols, "; filling output from input-grid rows selected at random.")
-    _idx_fill = np.random.choice(np.arange(len(dat)), size=opts.n_output_samples,
-                                 replace=(len(dat) < opts.n_output_samples))
-    for name in _extra_cols:
-        outidx = name_index_dict[name]
-        dat_out[:, outidx] = dat[_idx_fill, outidx]
+# Send all parameters through inversion, if possible; expect it to only affect parameters in rotated coords
+if supplemental_coordinate_invert:
+    # re-convert
+    dat_out[:,2:] = supplemental_coordinate_invert(dat_out[:,2:], coord_names=dat_orig_names, **external_kwargs)
 
-# NOTE: if m1 or m2 is "constant" (i.e., not in samples), the possibility for m2 > m1 arises! Re-sort masses here to avoid; use below code.
+# Note: If one of the masses carried as "constant", re-sort to enforce m1 > m2
 #if ("m1" not in coord_names) or ("m2" not in coord_names):
-#    print(" NOTE: re-sorting masses so m1 > m2 (precaution)")
+#    print("NOTE: re-sorting masses so m1 > m2 (precaution)")
 #    m1dx = name_index_dict["m1"]
+#    #print("Minimum m1 (pre-sort):",min(dat_out[:,m1dx]))
+#    #print("Minimum m2 (pre-sort):",min(dat_out[:,m1dx+1]))
 #    m1 = np.maximum(dat_out[:,m1dx], dat_out[:,m1dx+1]) #N.B.: assumes m2 col index after m1 col
 #    m2 = np.minimum(dat_out[:,m1dx], dat_out[:,m1dx+1])
 #    dat_out[:,m1dx] = m1
 #    dat_out[:,m1dx+1] = m2
+#    #print("Minimum m1 (post-sort):",min(dat_out[:,m1dx]))
+#    #print("Minimum m2 (post-sort):",min(dat_out[:,m1dx+1]))
 
 print(" Saving to ", opts.fname_output_samples+".dat")
 np.savetxt(opts.fname_output_samples+".dat",dat_out,header=" lnL sigma_lnL " + ' '.join(dat_orig_names))
